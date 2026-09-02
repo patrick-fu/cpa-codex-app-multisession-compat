@@ -9,19 +9,35 @@ permissions:
   contents: write
 
 jobs:
-  release-darwin-arm64:
-    if: github.ref_name == 'v0.1.0'
-    runs-on: macos-14
+  build:
+    if: github.ref_name == 'v0.1.1'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14
+            goos: darwin
+            goarch: arm64
+            extension: dylib
+            artifact: codex-app-multisession-compat_darwin_arm64.zip
+            nm_command: nm -gU
+          - runner: ubuntu-24.04
+            goos: linux
+            goarch: amd64
+            extension: so
+            artifact: codex-app-multisession-compat_linux_amd64.zip
+            nm_command: nm -g
+    runs-on: ${{ matrix.runner }}
     steps:
       # v5.0.0
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
           fetch-depth: 0
 
-      - name: Validate first-release tag
+      - name: Validate release tag
         run: |
           test "$GITHUB_REF_TYPE" = tag
-          test "$GITHUB_REF_NAME" = v0.1.0
+          test "$GITHUB_REF_NAME" = v0.1.1
 
       # v6.0.0
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16
@@ -33,42 +49,60 @@ jobs:
           go test ./...
           go vet ./...
 
-      - name: Build Darwin arm64 plugin
+      - name: Build native plugin
         env:
           CGO_ENABLED: "1"
-          GOARCH: arm64
-          GOOS: darwin
+          GOARCH: ${{ matrix.goarch }}
+          GOOS: ${{ matrix.goos }}
         run: |
           mkdir -p dist/stage
           go build -trimpath -buildmode=c-shared \
-            -o dist/stage/codex-app-multisession-compat.dylib ./plugin
+            -o dist/stage/codex-app-multisession-compat.${{ matrix.extension }} ./plugin
           rm dist/stage/codex-app-multisession-compat.h
 
       - name: Verify exported CPA ABI
         run: |
-          exports="$(nm -gU dist/stage/codex-app-multisession-compat.dylib)"
-          printf '%s\n' "$exports" | grep -q '_cliproxy_plugin_init$'
-          printf '%s\n' "$exports" | grep -q '_cliproxyPluginCall$'
-          printf '%s\n' "$exports" | grep -q '_cliproxyPluginFree$'
-          printf '%s\n' "$exports" | grep -q '_cliproxyPluginShutdown$'
+          exports="$( ${{ matrix.nm_command }} dist/stage/codex-app-multisession-compat.${{ matrix.extension }} )"
+          printf '%s\n' "$exports" | grep -Eq '_?cliproxy_plugin_init$'
+          printf '%s\n' "$exports" | grep -Eq '_?cliproxyPluginCall$'
+          printf '%s\n' "$exports" | grep -Eq '_?cliproxyPluginFree$'
+          printf '%s\n' "$exports" | grep -Eq '_?cliproxyPluginShutdown$'
 
       - name: Package exactly one root artifact
         run: |
           test "$(find dist/stage -maxdepth 1 -type f | wc -l | tr -d ' ')" = 1
-          test -f dist/stage/codex-app-multisession-compat.dylib
+          test -f dist/stage/codex-app-multisession-compat.${{ matrix.extension }}
           (
             cd dist/stage
-            zip -q ../codex-app-multisession-compat_darwin_arm64.zip \
-              codex-app-multisession-compat.dylib
+            zip -q ../${{ matrix.artifact }} \
+              codex-app-multisession-compat.${{ matrix.extension }}
           )
-          test "$(unzip -Z1 dist/codex-app-multisession-compat_darwin_arm64.zip)" = \
-            "codex-app-multisession-compat.dylib"
+          test "$(unzip -Z1 dist/${{ matrix.artifact }})" = \
+            "codex-app-multisession-compat.${{ matrix.extension }}"
+
+      # v4.6.2
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: release-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/${{ matrix.artifact }}
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      # v4.6.2
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: release-*
+          path: dist
+          merge-multiple: true
 
       - name: Create and validate checksums
         run: |
           (
             cd dist
-            shasum -a 256 codex-app-multisession-compat_darwin_arm64.zip > checksums.txt
+            shasum -a 256 codex-app-multisession-compat_*.zip > checksums.txt
             shasum -a 256 -c checksums.txt
           )
 
@@ -79,4 +113,5 @@ jobs:
           generate_release_notes: true
           files: |
             dist/codex-app-multisession-compat_darwin_arm64.zip
+            dist/codex-app-multisession-compat_linux_amd64.zip
             dist/checksums.txt
