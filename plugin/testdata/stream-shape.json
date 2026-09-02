@@ -1,0 +1,1 @@
+{"stream":true,"input":[{"type":"function_call_output","call_id":"stream-stale","namespace":"codex_app","name":"send_message_to_thread","output":"streaming request"}]}

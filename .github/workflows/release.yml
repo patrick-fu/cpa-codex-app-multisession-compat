@@ -1,0 +1,82 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release-darwin-arm64:
+    if: github.ref_name == 'v0.1.0'
+    runs-on: macos-14
+    steps:
+      # v5.0.0
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          fetch-depth: 0
+
+      - name: Validate first-release tag
+        run: |
+          test "$GITHUB_REF_TYPE" = tag
+          test "$GITHUB_REF_NAME" = v0.1.0
+
+      # v6.0.0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16
+        with:
+          go-version: "1.26.0"
+
+      - name: Test and vet
+        run: |
+          go test ./...
+          go vet ./...
+
+      - name: Build Darwin arm64 plugin
+        env:
+          CGO_ENABLED: "1"
+          GOARCH: arm64
+          GOOS: darwin
+        run: |
+          mkdir -p dist/stage
+          go build -trimpath -buildmode=c-shared \
+            -o dist/stage/codex-app-multisession-compat.dylib ./plugin
+          rm dist/stage/codex-app-multisession-compat.h
+
+      - name: Verify exported CPA ABI
+        run: |
+          exports="$(nm -gU dist/stage/codex-app-multisession-compat.dylib)"
+          printf '%s\n' "$exports" | grep -q '_cliproxy_plugin_init$'
+          printf '%s\n' "$exports" | grep -q '_cliproxyPluginCall$'
+          printf '%s\n' "$exports" | grep -q '_cliproxyPluginFree$'
+          printf '%s\n' "$exports" | grep -q '_cliproxyPluginShutdown$'
+
+      - name: Package exactly one root artifact
+        run: |
+          test "$(find dist/stage -maxdepth 1 -type f | wc -l | tr -d ' ')" = 1
+          test -f dist/stage/codex-app-multisession-compat.dylib
+          (
+            cd dist/stage
+            zip -q ../codex-app-multisession-compat_darwin_arm64.zip \
+              codex-app-multisession-compat.dylib
+          )
+          test "$(unzip -Z1 dist/codex-app-multisession-compat_darwin_arm64.zip)" = \
+            "codex-app-multisession-compat.dylib"
+
+      - name: Create and validate checksums
+        run: |
+          (
+            cd dist
+            shasum -a 256 codex-app-multisession-compat_darwin_arm64.zip > checksums.txt
+            shasum -a 256 -c checksums.txt
+          )
+
+      - name: Publish release assets
+        # v2.3.4
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65
+        with:
+          generate_release_notes: true
+          files: |
+            dist/codex-app-multisession-compat_darwin_arm64.zip
+            dist/checksums.txt

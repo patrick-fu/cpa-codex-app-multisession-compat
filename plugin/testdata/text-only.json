@@ -1,0 +1,1 @@
+{"input":[{"type":"function_call_output","call_id":"object","namespace":"codex_app","name":"create_thread","output":{"thread":"not text"}},{"type":"function_call_output","call_id":"number","namespace":"codex_app","name":"send_message_to_thread","output":7},{"type":"function_call_output","call_id":"null","namespace":"codex_app","name":"send_message_to_thread","output":null}]}

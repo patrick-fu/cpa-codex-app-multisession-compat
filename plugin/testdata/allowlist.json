@@ -1,0 +1,1 @@
+{"model":"gpt-5","input":[{"type":"function_call_output","call_id":"old-create","namespace":"codex_app","name":"create_thread","output":"{\"thread\":\"old\"}"},{"type":"function_call_output","call_id":"old-send","namespace":"codex_app","name":"send_message_to_thread","output":"{\"sent\":true}"}]}

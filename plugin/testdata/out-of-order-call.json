@@ -1,0 +1,1 @@
+{"input":[{"type":"function_call_output","call_id":"call-after","namespace":"codex_app","name":"send_message_to_thread","output":"must become context"},{"type":"function_call","call_id":"call-after","name":"send_message_to_thread"}]}

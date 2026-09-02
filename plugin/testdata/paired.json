@@ -1,0 +1,1 @@
+{"input":[{"type":"function_call","call_id":"paired-call","name":"send_message_to_thread"},{"type":"function_call_output","call_id":"paired-call","namespace":"codex_app","name":"send_message_to_thread","output":"paired output"}]}

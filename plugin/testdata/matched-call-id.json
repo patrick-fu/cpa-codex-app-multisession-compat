@@ -1,0 +1,1 @@
+{"input":[{"type":"function_call","call_id":"paired-call","name":"create_thread"},{"type":"function_call_output","call_id":"paired-call","namespace":"codex_app","name":"create_thread","output":"must remain paired"}]}

@@ -1,0 +1,1 @@
+{"input":[{"type":"function_call","call_id":"new-call","name":"other"},{"type":"function_call_output","call_id":"stale-call","namespace":"codex_app","name":"create_thread","output":"stale output"}]}
