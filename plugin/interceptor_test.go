@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"net/http"
 	"os"
 	"path/filepath"
 	"testing"
@@ -25,7 +26,8 @@ func TestRewriteFixtures(t *testing.T) {
 		{"parallel-pairs", false},
 		{"out-of-order-call", true},
 		{"non-target", false},
-		{"text-only", false},
+		{"text-only", true},
+		{"same-call-id-double-output", true},
 		{"malformed-root", false},
 		{"malformed-input", false},
 		{"stream-shape", true},
@@ -62,23 +64,94 @@ func TestRewriteIsIdempotent(t *testing.T) {
 func TestBeforeAuthIsDisabledByDefaultAndScopedToResponses(t *testing.T) {
 	resetConfig()
 	body := mustReadFixture(t, "allowlist.json")
-	response := invokeBefore(t, "openai-response", false, body)
+	response := invokeBefore(t, "openai-response", false, nil, body)
 	if len(response.Body) != 0 {
 		t.Fatal("disabled plugin returned a body")
 	}
 	if err := configure([]byte("enabled: true\n")); err != nil {
 		t.Fatal(err)
 	}
-	response = invokeBefore(t, "openai", false, body)
+	response = invokeBefore(t, "openai", false, nil, body)
 	if len(response.Body) != 0 {
 		t.Fatal("non-Responses source was modified")
 	}
-	response = invokeBefore(t, "openai-response", true, body)
+	response = invokeBefore(t, "openai-response", true, nil, body)
 	if len(response.Body) == 0 {
 		t.Fatal("streaming Responses request was not modified")
 	}
 	if response.Terminate || response.StatusCode != 0 || len(response.ResponseBody) != 0 {
 		t.Fatalf("plugin declared a rejection response: %#v", response)
+	}
+}
+
+func TestBeforeAuthDoesNotRequireSubagentHeader(t *testing.T) {
+	resetConfig()
+	if err := configure([]byte("enabled: true\n")); err != nil {
+		t.Fatal(err)
+	}
+	body := mustReadFixture(t, "allowlist.json")
+	for _, tc := range []struct {
+		name    string
+		headers http.Header
+		changed bool
+	}{
+		{name: "missing", changed: true},
+		{name: "collab-spawn", headers: http.Header{"X-Openai-Subagent": {"collab_spawn"}}, changed: true},
+		{name: "other", headers: http.Header{"X-Openai-Subagent": {"other"}}, changed: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			response := invokeBefore(t, openAIResponsesFormat, false, tc.headers, body)
+			if (len(response.Body) > 0) != tc.changed {
+				t.Fatalf("response body changed = %v, want %v", len(response.Body) > 0, tc.changed)
+			}
+		})
+	}
+}
+
+func TestRewriteConsumesPairedCallIDOnce(t *testing.T) {
+	body := mustReadFixture(t, "same-call-id-double-output.json")
+	got, changed := rewriteOrphanedCodexAppOutputs(body)
+	if !changed {
+		t.Fatal("duplicate output was not rewritten after the paired output consumed its call ID")
+	}
+	var root struct {
+		Input []json.RawMessage `json:"input"`
+	}
+	if err := json.Unmarshal(got, &root); err != nil {
+		t.Fatal(err)
+	}
+	var first functionCallOutputItem
+	if err := json.Unmarshal(root.Input[1], &first); err != nil || first.Type != "function_call_output" {
+		t.Fatalf("first output was not preserved: %s; error = %v", root.Input[1], err)
+	}
+	assertOnlyExpectedConversions(t, got)
+}
+
+func TestRewriteConvertsNonStringOutputsToJSONText(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		output     string
+		wantOutput string
+	}{
+		{name: "object", output: `{"thread":"new"}`, wantOutput: `{"thread":"new"}`},
+		{name: "array", output: `["one",2]`, wantOutput: `["one",2]`},
+		{name: "null", output: `null`, wantOutput: `null`},
+		{name: "missing", wantOutput: `null`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			item := `{"type":"function_call_output","namespace":"codex_app","name":"create_thread"`
+			if tc.output != "" {
+				item += `,"output":` + tc.output
+			}
+			item += `}`
+			got, changed := rewriteOrphanedCodexAppOutputs([]byte(`{"input":[` + item + `]}`))
+			if !changed {
+				t.Fatal("non-string output was not rewritten")
+			}
+			if text := convertedOutputText(t, got); text != formatConvertedOutput(createThreadTool, tc.wantOutput) {
+				t.Fatalf("converted output = %q, want %q", text, formatConvertedOutput(createThreadTool, tc.wantOutput))
+			}
+		})
 	}
 }
 
@@ -102,31 +175,42 @@ func TestRegistrationDeclaresOnlyRequestInterceptor(t *testing.T) {
 	}
 }
 
-func TestRegistrationReconfigureAndShutdownLifecycle(t *testing.T) {
+func TestSchema5RegistrationReconfigureAndShutdownLifecycle(t *testing.T) {
 	resetConfig()
-	request, err := json.Marshal(lifecycleRequest{
-		ConfigYAML:    []byte("enabled: true\n"),
-		SchemaVersion: pluginabi.SchemaVersion,
+	if pluginabi.SchemaVersion != 5 {
+		t.Fatalf("plugin schema version = %d, want 5", pluginabi.SchemaVersion)
+	}
+	registerRequest, err := json.Marshal(lifecycleRequest{
+		ConfigYAML:    []byte("enabled: false\n"),
+		SchemaVersion: 5,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, method := range []string{pluginabi.MethodPluginRegister, pluginabi.MethodPluginReconfigure} {
-		response, err := handleMethod(method, request)
-		if err != nil {
-			t.Fatalf("%s: %v", method, err)
-		}
-		if !pluginEnabled() {
-			t.Fatalf("%s did not apply enabled config", method)
-		}
-		var envelope struct {
-			OK     bool            `json:"ok"`
-			Result json.RawMessage `json:"result"`
-		}
-		if err := json.Unmarshal(response, &envelope); err != nil || !envelope.OK {
-			t.Fatalf("%s response = %s, error = %v", method, response, err)
-		}
+	response, err := handleMethod(pluginabi.MethodPluginRegister, registerRequest)
+	if err != nil {
+		t.Fatalf("register: %v", err)
 	}
+	if pluginEnabled() {
+		t.Fatal("register did not apply disabled config")
+	}
+	assertSchema5RegistrationResponse(t, "register", response)
+
+	reconfigureRequest, err := json.Marshal(lifecycleRequest{
+		ConfigYAML:    []byte("enabled: true\n"),
+		SchemaVersion: 5,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err = handleMethod(pluginabi.MethodPluginReconfigure, reconfigureRequest)
+	if err != nil {
+		t.Fatalf("reconfigure: %v", err)
+	}
+	if !pluginEnabled() {
+		t.Fatal("reconfigure did not apply enabled config")
+	}
+	assertSchema5RegistrationResponse(t, "reconfigure", response)
 	if _, err := handleMethod(pluginabi.MethodPluginShutdown, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -136,12 +220,30 @@ func TestRegistrationReconfigureAndShutdownLifecycle(t *testing.T) {
 }
 
 func TestRegistrationRejectsDifferentCPASchema(t *testing.T) {
-	raw, err := json.Marshal(lifecycleRequest{SchemaVersion: pluginabi.SchemaVersion + 1})
+	raw, err := json.Marshal(lifecycleRequest{SchemaVersion: 4})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := handleMethod(pluginabi.MethodPluginRegister, raw); err == nil {
-		t.Fatal("registration accepted an unsupported CPA schema")
+		t.Fatal("registration accepted unsupported CPA schema 4")
+	}
+}
+
+func assertSchema5RegistrationResponse(t *testing.T, method string, response []byte) {
+	t.Helper()
+	var envelope struct {
+		OK     bool            `json:"ok"`
+		Result json.RawMessage `json:"result"`
+	}
+	if err := json.Unmarshal(response, &envelope); err != nil || !envelope.OK {
+		t.Fatalf("%s response = %s, error = %v", method, response, err)
+	}
+	var registration registration
+	if err := json.Unmarshal(envelope.Result, &registration); err != nil {
+		t.Fatalf("%s registration = %s, error = %v", method, envelope.Result, err)
+	}
+	if registration.SchemaVersion != 5 {
+		t.Fatalf("%s registration schema version = %d, want 5", method, registration.SchemaVersion)
 	}
 }
 
@@ -170,11 +272,12 @@ func TestAfterAuthIsAlwaysPassThrough(t *testing.T) {
 	}
 }
 
-func invokeBefore(t *testing.T, source string, stream bool, body []byte) pluginapi.RequestInterceptResponse {
+func invokeBefore(t *testing.T, source string, stream bool, headers http.Header, body []byte) pluginapi.RequestInterceptResponse {
 	t.Helper()
 	raw, err := json.Marshal(rpcRequestInterceptRequest{RequestInterceptRequest: pluginapi.RequestInterceptRequest{
 		SourceFormat: source,
 		Stream:       stream,
+		Headers:      headers,
 		Body:         body,
 	}})
 	if err != nil {
@@ -195,6 +298,24 @@ func invokeBefore(t *testing.T, source string, stream bool, body []byte) plugina
 		t.Fatal(err)
 	}
 	return response
+}
+
+func convertedOutputText(t *testing.T, body []byte) string {
+	t.Helper()
+	var root struct {
+		Input []struct {
+			Content []struct {
+				Text string `json:"text"`
+			} `json:"content"`
+		} `json:"input"`
+	}
+	if err := json.Unmarshal(body, &root); err != nil {
+		t.Fatal(err)
+	}
+	if len(root.Input) != 1 || len(root.Input[0].Content) != 1 {
+		t.Fatalf("converted input = %s", body)
+	}
+	return root.Input[0].Content[0].Text
 }
 
 func assertOnlyExpectedConversions(t *testing.T, body []byte) {

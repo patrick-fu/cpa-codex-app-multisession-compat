@@ -1,0 +1,1 @@
+{"input":[{"type":"function_call","call_id":"shared-call","name":"create_thread"},{"type":"function_call_output","call_id":"shared-call","namespace":"codex_app","name":"create_thread","output":"first paired output"},{"type":"function_call_output","call_id":"shared-call","namespace":"codex_app","name":"create_thread","output":"second orphaned output"}]}

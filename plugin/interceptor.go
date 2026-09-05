@@ -52,14 +52,21 @@ func rewriteOrphanedCodexAppOutputs(body []byte) ([]byte, bool) {
 	}
 
 	changed := false
-	seenCallIDs := make(map[string]struct{})
+	availableCallIDs := make(map[string]int)
 	for index, rawItem := range items {
 		var call functionCallItem
 		if json.Unmarshal(rawItem, &call) == nil && call.Type == "function_call" && call.CallID != "" {
-			seenCallIDs[call.CallID] = struct{}{}
+			availableCallIDs[call.CallID]++
 			continue
 		}
-		replacement, ok := replacementFor(rawItem, seenCallIDs)
+		var output functionCallOutputItem
+		if json.Unmarshal(rawItem, &output) == nil && output.Type == "function_call_output" && output.CallID != "" {
+			if availableCallIDs[output.CallID] > 0 {
+				availableCallIDs[output.CallID]--
+				continue
+			}
+		}
+		replacement, ok := replacementFor(rawItem)
 		if !ok {
 			continue
 		}
@@ -94,7 +101,7 @@ type functionCallOutputItem struct {
 	Output    json.RawMessage `json:"output"`
 }
 
-func replacementFor(rawItem json.RawMessage, callIDs map[string]struct{}) (json.RawMessage, bool) {
+func replacementFor(rawItem json.RawMessage) (json.RawMessage, bool) {
 	var item functionCallOutputItem
 	if err := json.Unmarshal(rawItem, &item); err != nil {
 		return nil, false
@@ -102,13 +109,8 @@ func replacementFor(rawItem json.RawMessage, callIDs map[string]struct{}) (json.
 	if item.Type != "function_call_output" || item.Namespace != codexAppNamespace || !isTargetTool(item.Name) {
 		return nil, false
 	}
-	if item.CallID != "" {
-		if _, paired := callIDs[item.CallID]; paired {
-			return nil, false
-		}
-	}
-	var output *string
-	if len(item.Output) == 0 || json.Unmarshal(item.Output, &output) != nil || output == nil {
+	output, ok := outputText(item.Output)
+	if !ok {
 		return nil, false
 	}
 	replacement, err := json.Marshal(struct {
@@ -125,13 +127,27 @@ func replacementFor(rawItem json.RawMessage, callIDs map[string]struct{}) (json.
 			Type string `json:"type"`
 			Text string `json:"text"`
 		}{
-			{Type: "input_text", Text: formatConvertedOutput(item.Name, *output)},
+			{Type: "input_text", Text: formatConvertedOutput(item.Name, output)},
 		},
 	})
 	if err != nil {
 		return nil, false
 	}
 	return replacement, true
+}
+
+func outputText(raw json.RawMessage) (string, bool) {
+	if len(raw) == 0 {
+		return "null", true
+	}
+	var output *string
+	if err := json.Unmarshal(raw, &output); err == nil && output != nil {
+		return *output, true
+	}
+	if !json.Valid(raw) {
+		return "", false
+	}
+	return string(raw), true
 }
 
 func isTargetTool(name string) bool {
