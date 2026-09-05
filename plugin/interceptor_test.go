@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -61,6 +62,73 @@ func TestRewriteIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestRewriteIncrementalCodexAppOutputBoundaries(t *testing.T) {
+	for _, toolName := range []string{createThreadTool, sendMessageTool} {
+		t.Run(toolName, func(t *testing.T) {
+			incremental := []byte(`{"previous_response_id":"resp_123","input":[{"type":"function_call_output","call_id":"call_123","namespace":"codex_app","name":"` + toolName + `","output":"incremental output"}]}`)
+			got, changed := rewriteOrphanedCodexAppOutputs(incremental)
+			if changed || !bytes.Equal(got, incremental) {
+				t.Fatalf("incremental output changed=%v\n got: %s\nwant: %s", changed, got, incremental)
+			}
+
+			responseAppend := []byte(`{"type":"response.append","input":[{"type":"function_call_output","call_id":"call_123","namespace":"codex_app","name":"` + toolName + `","output":"continuation output"}]}`)
+			got, changed = rewriteOrphanedCodexAppOutputs(responseAppend)
+			if changed || !bytes.Equal(got, responseAppend) {
+				t.Fatalf("response.append output changed=%v\n got: %s\nwant: %s", changed, got, responseAppend)
+			}
+
+			missingCallID := []byte(`{"previous_response_id":"resp_123","input":[{"type":"function_call_output","namespace":"codex_app","name":"` + toolName + `","output":"orphan output"}]}`)
+			got, changed = rewriteOrphanedCodexAppOutputs(missingCallID)
+			if !changed {
+				t.Fatal("orphaned incremental output without call ID was not rewritten")
+			}
+			if text := convertedOutputText(t, got); text != formatConvertedOutput(toolName, "orphan output") {
+				t.Fatalf("converted output = %q, want %q", text, formatConvertedOutput(toolName, "orphan output"))
+			}
+
+			staleCallID := []byte(`{"input":[{"type":"function_call_output","call_id":"stale_123","namespace":"codex_app","name":"` + toolName + `","output":"stale output"}]}`)
+			got, changed = rewriteOrphanedCodexAppOutputs(staleCallID)
+			if !changed {
+				t.Fatal("stale output without previous response ID was not rewritten")
+			}
+			if text := convertedOutputText(t, got); text != formatConvertedOutput(toolName, "stale output") {
+				t.Fatalf("converted output = %q, want %q", text, formatConvertedOutput(toolName, "stale output"))
+			}
+		})
+	}
+}
+
+func TestRewriteIncrementalNonTargetOutputsAreUntouched(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body []byte
+	}{
+		{
+			name: "previous-response-id other namespace",
+			body: []byte(`{"previous_response_id":"resp_123","input":[{"type":"function_call_output","call_id":"call_123","namespace":"other","name":"create_thread","output":"non-target output"}]}`),
+		},
+		{
+			name: "previous-response-id other name",
+			body: []byte(`{"previous_response_id":"resp_123","input":[{"type":"function_call_output","call_id":"call_123","namespace":"codex_app","name":"other_tool","output":"non-target output"}]}`),
+		},
+		{
+			name: "response-append other namespace",
+			body: []byte(`{"type":"response.append","input":[{"type":"function_call_output","call_id":"call_123","namespace":"other","name":"create_thread","output":"non-target output"}]}`),
+		},
+		{
+			name: "response-append other name",
+			body: []byte(`{"type":"response.append","input":[{"type":"function_call_output","call_id":"call_123","namespace":"codex_app","name":"other_tool","output":"non-target output"}]}`),
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, changed := rewriteOrphanedCodexAppOutputs(tc.body)
+			if changed || !bytes.Equal(got, tc.body) {
+				t.Fatalf("non-target incremental output changed=%v\n got: %s\nwant: %s", changed, got, tc.body)
+			}
+		})
+	}
+}
+
 func TestBeforeAuthIsDisabledByDefaultAndScopedToResponses(t *testing.T) {
 	resetConfig()
 	body := mustReadFixture(t, "allowlist.json")
@@ -75,7 +143,7 @@ func TestBeforeAuthIsDisabledByDefaultAndScopedToResponses(t *testing.T) {
 	if len(response.Body) != 0 {
 		t.Fatal("non-Responses source was modified")
 	}
-	response = invokeBefore(t, "openai-response", true, nil, body)
+	response = invokeBefore(t, "openai-response", true, http.Header{"X-Openai-Subagent": {"collab_spawn"}}, body)
 	if len(response.Body) == 0 {
 		t.Fatal("streaming Responses request was not modified")
 	}
@@ -84,7 +152,7 @@ func TestBeforeAuthIsDisabledByDefaultAndScopedToResponses(t *testing.T) {
 	}
 }
 
-func TestBeforeAuthDoesNotRequireSubagentHeader(t *testing.T) {
+func TestBeforeAuthRequiresCollabSpawnSubagentHeader(t *testing.T) {
 	resetConfig()
 	if err := configure([]byte("enabled: true\n")); err != nil {
 		t.Fatal(err)
@@ -95,9 +163,10 @@ func TestBeforeAuthDoesNotRequireSubagentHeader(t *testing.T) {
 		headers http.Header
 		changed bool
 	}{
-		{name: "missing", changed: true},
+		{name: "missing", changed: false},
 		{name: "collab-spawn", headers: http.Header{"X-Openai-Subagent": {"collab_spawn"}}, changed: true},
-		{name: "other", headers: http.Header{"X-Openai-Subagent": {"other"}}, changed: true},
+		{name: "mixed-case header and value", headers: http.Header{"x-openai-subagent": {"COLLAB_SPAWN"}}, changed: true},
+		{name: "other", headers: http.Header{"X-Openai-Subagent": {"other"}}, changed: false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			response := invokeBefore(t, openAIResponsesFormat, false, tc.headers, body)
@@ -156,7 +225,7 @@ func TestRewriteConvertsNonStringOutputsToJSONText(t *testing.T) {
 }
 
 func TestRegistrationDeclaresOnlyRequestInterceptor(t *testing.T) {
-	registration := pluginRegistration()
+	registration := pluginRegistration(4)
 	if !registration.Capabilities.RequestInterceptor {
 		t.Fatal("request interceptor not declared")
 	}
@@ -175,42 +244,46 @@ func TestRegistrationDeclaresOnlyRequestInterceptor(t *testing.T) {
 	}
 }
 
-func TestSchema5RegistrationReconfigureAndShutdownLifecycle(t *testing.T) {
+func TestSchema4And5RegistrationReconfigureAndShutdownLifecycle(t *testing.T) {
 	resetConfig()
 	if pluginabi.SchemaVersion != 5 {
 		t.Fatalf("plugin schema version = %d, want 5", pluginabi.SchemaVersion)
 	}
-	registerRequest, err := json.Marshal(lifecycleRequest{
-		ConfigYAML:    []byte("enabled: false\n"),
-		SchemaVersion: 5,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	response, err := handleMethod(pluginabi.MethodPluginRegister, registerRequest)
-	if err != nil {
-		t.Fatalf("register: %v", err)
-	}
-	if pluginEnabled() {
-		t.Fatal("register did not apply disabled config")
-	}
-	assertSchema5RegistrationResponse(t, "register", response)
+	for _, schemaVersion := range []uint32{4, 5} {
+		t.Run(fmt.Sprintf("schema-%d", schemaVersion), func(t *testing.T) {
+			registerRequest, err := json.Marshal(lifecycleRequest{
+				ConfigYAML:    []byte("enabled: false\n"),
+				SchemaVersion: schemaVersion,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			response, err := handleMethod(pluginabi.MethodPluginRegister, registerRequest)
+			if err != nil {
+				t.Fatalf("register: %v", err)
+			}
+			if pluginEnabled() {
+				t.Fatal("register did not apply disabled config")
+			}
+			assertRegistrationResponse(t, "register", response, schemaVersion)
 
-	reconfigureRequest, err := json.Marshal(lifecycleRequest{
-		ConfigYAML:    []byte("enabled: true\n"),
-		SchemaVersion: 5,
-	})
-	if err != nil {
-		t.Fatal(err)
+			reconfigureRequest, err := json.Marshal(lifecycleRequest{
+				ConfigYAML:    []byte("enabled: true\n"),
+				SchemaVersion: schemaVersion,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			response, err = handleMethod(pluginabi.MethodPluginReconfigure, reconfigureRequest)
+			if err != nil {
+				t.Fatalf("reconfigure: %v", err)
+			}
+			if !pluginEnabled() {
+				t.Fatal("reconfigure did not apply enabled config")
+			}
+			assertRegistrationResponse(t, "reconfigure", response, schemaVersion)
+		})
 	}
-	response, err = handleMethod(pluginabi.MethodPluginReconfigure, reconfigureRequest)
-	if err != nil {
-		t.Fatalf("reconfigure: %v", err)
-	}
-	if !pluginEnabled() {
-		t.Fatal("reconfigure did not apply enabled config")
-	}
-	assertSchema5RegistrationResponse(t, "reconfigure", response)
 	if _, err := handleMethod(pluginabi.MethodPluginShutdown, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -220,16 +293,16 @@ func TestSchema5RegistrationReconfigureAndShutdownLifecycle(t *testing.T) {
 }
 
 func TestRegistrationRejectsDifferentCPASchema(t *testing.T) {
-	raw, err := json.Marshal(lifecycleRequest{SchemaVersion: 4})
+	raw, err := json.Marshal(lifecycleRequest{SchemaVersion: 3})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := handleMethod(pluginabi.MethodPluginRegister, raw); err == nil {
-		t.Fatal("registration accepted unsupported CPA schema 4")
+		t.Fatal("registration accepted unsupported CPA schema 3")
 	}
 }
 
-func assertSchema5RegistrationResponse(t *testing.T, method string, response []byte) {
+func assertRegistrationResponse(t *testing.T, method string, response []byte, schemaVersion uint32) {
 	t.Helper()
 	var envelope struct {
 		OK     bool            `json:"ok"`
@@ -242,8 +315,8 @@ func assertSchema5RegistrationResponse(t *testing.T, method string, response []b
 	if err := json.Unmarshal(envelope.Result, &registration); err != nil {
 		t.Fatalf("%s registration = %s, error = %v", method, envelope.Result, err)
 	}
-	if registration.SchemaVersion != 5 {
-		t.Fatalf("%s registration schema version = %d, want 5", method, registration.SchemaVersion)
+	if registration.SchemaVersion != schemaVersion {
+		t.Fatalf("%s registration schema version = %d, want %d", method, registration.SchemaVersion, schemaVersion)
 	}
 }
 

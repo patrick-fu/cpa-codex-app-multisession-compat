@@ -4,19 +4,19 @@
 
 ## What it does
 
-Before CPA selects credentials, and only for `SourceFormat: openai-response`, the plugin examines a Responses API `input` array. It replaces an item only when all of these are true:
+Before CPA selects credentials, the plugin examines a Responses API `input` array only when `SourceFormat: openai-response` and a request header name/value matches `X-Openai-Subagent: collab_spawn` case-insensitively. Requests with a missing header or any other value pass through unchanged. It replaces an item only when all of these are true:
 
 - `type` is `function_call_output`;
 - `namespace` is `codex_app`;
 - `name` is `create_thread` or `send_message_to_thread`;
 - `output` is a JSON value (or is missing); and
-- `call_id` is missing or empty, or no preceding unpaired `function_call` in this request has the same non-empty `call_id`.
+- `call_id` is missing or empty; or, when the root has neither a non-empty `previous_response_id` nor `type: "response.append"`, no preceding unpaired `function_call` in this request has the same non-empty `call_id`.
 
-The replacement is an ordinary `role: user`, `type: message` item with one `input_text` part. Its text begins with an explicit source label, followed by the original output string. The plugin never creates a tool call, call ID, tool name, or any other tool state. It is the fallback for `codex_app.create_thread` / `send_message_to_thread` outputs that reach this interceptor through dynamic or host transport. `X-Openai-Subagent: collab_spawn` is an upstream native-spawn scoping signal, not a plugin entry condition: missing, `collab_spawn`, and other values all follow the same fallback path.
+The replacement is an ordinary `role: user`, `type: message` item with one `input_text` part. Its text begins with an explicit source label, followed by the original output string. The plugin never creates a tool call, call ID, tool name, or any other tool state. It is the fallback for `codex_app.create_thread` / `send_message_to_thread` outputs within the upstream native-spawn scope marked by `X-Openai-Subagent: collab_spawn`.
 
-This protects paired and parallel tool-call history: each preceding `function_call` can keep one output with its `call_id` as-is. A second output with that same ID, or an output that precedes its call, is downgraded, avoiding invalid tool results. String output is preserved as text; other JSON output is preserved as JSON text, and a missing `output` becomes `null`. The plugin leaves all non-allowlisted namespaces/names, custom outputs, malformed request roots or `input`, and non-Responses requests untouched. Streaming request shape does not change this rule.
+For a stateless incremental request, either a non-empty root `previous_response_id` or root `type: "response.append"`, plus a non-empty allowlisted output `call_id`, is conservatively preserved as-is; the plugin does not infer whether that call belongs to earlier history. A real orphan without a `call_id` is still downgraded. Without either continuation marker, the normal same-request paired/parallel boundary applies: each preceding `function_call` can keep one output with its `call_id` as-is, while a second output with that same ID, a stale ID, or an output that precedes its call is downgraded. String output is preserved as text; other JSON output is preserved as JSON text, and a missing `output` becomes `null`. The plugin leaves all non-allowlisted namespaces/names, custom outputs, malformed request roots or `input`, and non-Responses requests untouched. Streaming request shape does not change this rule.
 
-中文要点：这是 `codex_app.create_thread` / `send_message_to_thread` 的 fallback；`X-Openai-Subagent: collab_spawn` 只约束上游 native spawn 范围，不是插件入口。无 header、`collab_spawn` 或其他值都会走同一目标路径；默认关闭，每个已配对调用只保留一个同 ID 输出。
+中文要点：这是 `codex_app.create_thread` / `send_message_to_thread` 的 fallback；仅当 header 名和值以大小写无关方式匹配 `X-Openai-Subagent: collab_spawn` 时才会进入改写路径，缺失该 header 或值不匹配会直通。根对象有非空 `previous_response_id` 或 `type: "response.append"` 时，带非空 `call_id` 的目标输出保守保持原状；没有 `call_id` 的真实 orphan 仍会降级。两种 continuation 标记都没有时，每个已配对调用只保留一个同 ID 输出。
 
 ## Threat boundary
 
@@ -28,13 +28,13 @@ Review the source and release checksum before enabling it. The plugin is unaffil
 
 - CPA: **v7.2.151 only**
 - Plugin ABI: v1; RPC schema: **5**
-- Release v0.2.0: macOS/Darwin arm64 and Linux amd64
+- Plugin version: v0.2.1 (macOS/Darwin arm64 and Linux amd64 builds)
 
 Windows and Intel macOS artifacts are not built or published.
 
 ## Install
 
-1. Download the platform ZIP and `checksums.txt` from the `v0.2.0` release:
+1. Obtain a v0.2.1 platform ZIP and matching `checksums.txt` from your approved distribution channel:
 
    - macOS Apple Silicon: `codex-app-multisession-compat_darwin_arm64.zip`
    - Linux x86_64: `codex-app-multisession-compat_linux_amd64.zip`

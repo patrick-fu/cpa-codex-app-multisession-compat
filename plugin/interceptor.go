@@ -3,6 +3,8 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"strings"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
 )
@@ -27,12 +29,26 @@ func handleRequestInterceptBefore(raw []byte) ([]byte, error) {
 		return nil, err
 	}
 	response := pluginapi.RequestInterceptResponse{}
-	if pluginEnabled() && req.SourceFormat == openAIResponsesFormat {
+	if pluginEnabled() && req.SourceFormat == openAIResponsesFormat && hasCollabSpawnHeader(req.Headers) {
 		if body, changed := rewriteOrphanedCodexAppOutputs(req.Body); changed {
 			response.Body = body
 		}
 	}
 	return okEnvelope(response)
+}
+
+func hasCollabSpawnHeader(headers http.Header) bool {
+	for name, values := range headers {
+		if !strings.EqualFold(name, "X-Openai-Subagent") {
+			continue
+		}
+		for _, value := range values {
+			if strings.EqualFold(value, "collab_spawn") {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // rewriteOrphanedCodexAppOutputs replaces only targeted, unpaired function outputs.
@@ -52,6 +68,7 @@ func rewriteOrphanedCodexAppOutputs(body []byte) ([]byte, bool) {
 	}
 
 	changed := false
+	isIncrementalRequest := hasNonEmptyPreviousResponseID(root) || hasResponseAppendType(root)
 	availableCallIDs := make(map[string]int)
 	for index, rawItem := range items {
 		var call functionCallItem
@@ -61,6 +78,9 @@ func rewriteOrphanedCodexAppOutputs(body []byte) ([]byte, bool) {
 		}
 		var output functionCallOutputItem
 		if json.Unmarshal(rawItem, &output) == nil && output.Type == "function_call_output" && output.CallID != "" {
+			if isIncrementalRequest && output.Namespace == codexAppNamespace && isTargetTool(output.Name) {
+				continue
+			}
 			if availableCallIDs[output.CallID] > 0 {
 				availableCallIDs[output.CallID]--
 				continue
@@ -86,6 +106,24 @@ func rewriteOrphanedCodexAppOutputs(body []byte) ([]byte, bool) {
 		return body, false
 	}
 	return rewritten, true
+}
+
+func hasNonEmptyPreviousResponseID(root map[string]json.RawMessage) bool {
+	rawPreviousResponseID, ok := root["previous_response_id"]
+	if !ok {
+		return false
+	}
+	var previousResponseID string
+	return json.Unmarshal(rawPreviousResponseID, &previousResponseID) == nil && previousResponseID != ""
+}
+
+func hasResponseAppendType(root map[string]json.RawMessage) bool {
+	rawType, ok := root["type"]
+	if !ok {
+		return false
+	}
+	var requestType string
+	return json.Unmarshal(rawType, &requestType) == nil && requestType == "response.append"
 }
 
 type functionCallItem struct {
