@@ -1,0 +1,25 @@
+{
+  "schema_version": 2,
+  "plugins": [
+    {
+      "id": "codex-app-multisession-compat",
+      "name": "CPA Codex App Multisession Compatibility",
+      "description": "A native CLIProxyAPI plugin that provides Codex App multisession replay compatibility.",
+      "author": "Patrick Fu",
+      "version": "0.2.0",
+      "repository": "https://github.com/patrick-fu/cpa-codex-app-multisession-compat",
+      "install": {
+        "type": "direct",
+        "artifacts": [
+          {
+            "goos": "linux",
+            "goarch": "amd64",
+            "url": "https://github.com/patrick-fu/cpa-codex-app-multisession-compat/releases/download/v0.2.0/codex-app-multisession-compat_linux_amd64.zip",
+            "sha256": "bd738daa78b365270d2227495f62d45ef3b54812ede6173eb5b4c814773dbb81",
+            "size": 3595041
+          }
+        ]
+      }
+    }
+  ]
+}
