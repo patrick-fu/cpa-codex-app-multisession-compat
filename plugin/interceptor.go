@@ -3,8 +3,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"net/http"
-	"strings"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
 )
@@ -29,26 +27,12 @@ func handleRequestInterceptBefore(raw []byte) ([]byte, error) {
 		return nil, err
 	}
 	response := pluginapi.RequestInterceptResponse{}
-	if pluginEnabled() && req.SourceFormat == openAIResponsesFormat && hasCollabSpawnHeader(req.Headers) {
+	if pluginEnabled() && req.SourceFormat == openAIResponsesFormat {
 		if body, changed := rewriteOrphanedCodexAppOutputs(req.Body); changed {
 			response.Body = body
 		}
 	}
 	return okEnvelope(response)
-}
-
-func hasCollabSpawnHeader(headers http.Header) bool {
-	for name, values := range headers {
-		if !strings.EqualFold(name, "X-Openai-Subagent") {
-			continue
-		}
-		for _, value := range values {
-			if strings.EqualFold(value, "collab_spawn") {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 // rewriteOrphanedCodexAppOutputs replaces only targeted, unpaired function outputs.

@@ -143,7 +143,7 @@ func TestBeforeAuthIsDisabledByDefaultAndScopedToResponses(t *testing.T) {
 	if len(response.Body) != 0 {
 		t.Fatal("non-Responses source was modified")
 	}
-	response = invokeBefore(t, "openai-response", true, http.Header{"X-Openai-Subagent": {"collab_spawn"}}, body)
+	response = invokeBefore(t, "openai-response", true, nil, body)
 	if len(response.Body) == 0 {
 		t.Fatal("streaming Responses request was not modified")
 	}
@@ -152,7 +152,7 @@ func TestBeforeAuthIsDisabledByDefaultAndScopedToResponses(t *testing.T) {
 	}
 }
 
-func TestBeforeAuthRequiresCollabSpawnSubagentHeader(t *testing.T) {
+func TestBeforeAuthDoesNotRequireSubagentHeader(t *testing.T) {
 	resetConfig()
 	if err := configure([]byte("enabled: true\n")); err != nil {
 		t.Fatal(err)
@@ -163,10 +163,11 @@ func TestBeforeAuthRequiresCollabSpawnSubagentHeader(t *testing.T) {
 		headers http.Header
 		changed bool
 	}{
-		{name: "missing", changed: false},
+		{name: "missing", changed: true},
 		{name: "collab-spawn", headers: http.Header{"X-Openai-Subagent": {"collab_spawn"}}, changed: true},
 		{name: "mixed-case header and value", headers: http.Header{"x-openai-subagent": {"COLLAB_SPAWN"}}, changed: true},
-		{name: "other", headers: http.Header{"X-Openai-Subagent": {"other"}}, changed: false},
+		{name: "other", headers: http.Header{"X-Openai-Subagent": {"other"}}, changed: true},
+		{name: "unrelated header", headers: http.Header{"X-Other": {"value"}}, changed: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			response := invokeBefore(t, openAIResponsesFormat, false, tc.headers, body)
