@@ -105,10 +105,11 @@ jobs:
             shasum -a 256 -c checksums.txt
           )
 
-      - name: Publish release assets
+      - name: Create draft release assets for deployment validation
         # v2.3.4
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65
         with:
+          draft: true
           generate_release_notes: true
           files: |
             dist/codex-app-multisession-compat_darwin_arm64.zip

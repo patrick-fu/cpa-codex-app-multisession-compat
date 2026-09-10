@@ -1,6 +1,6 @@
 # CPA Codex App Multisession Compatibility
 
-`cpa-codex-app-multisession-compat` is a native [CLIProxyAPI (CPA)](https://github.com/router-for-me/CLIProxyAPI) v7.2.151 plugin for a narrow Codex App replay-compatibility case. It is disabled by default.
+`cpa-codex-app-multisession-compat` is a native [CLIProxyAPI (CPA)](https://github.com/router-for-me/CLIProxyAPI) plugin for a narrow Codex App replay-compatibility case. It is disabled by default.
 
 ## What it does
 
@@ -16,7 +16,7 @@ The replacement is an ordinary `role: user`, `type: message` item with one `inpu
 
 For a stateless incremental request, either a non-empty root `previous_response_id` or root `type: "response.append"`, plus a non-empty allowlisted output `call_id`, is conservatively preserved as-is; the plugin does not infer whether that call belongs to earlier history. A real orphan without a `call_id` is still downgraded. Without either continuation marker, the normal same-request paired/parallel boundary applies: each preceding `function_call` can keep one output with its `call_id` as-is, while a second output with that same ID, a stale ID, or an output that precedes its call is downgraded. String output is preserved as text; other JSON output is preserved as JSON text, and a missing `output` becomes `null`. The plugin leaves all non-allowlisted namespaces/names, custom outputs, malformed request roots or `input`, and non-Responses requests untouched. Streaming request shape does not change this rule.
 
-中文要点：这是 `codex_app.create_thread` / `send_message_to_thread` 的 fallback；默认关闭，仅改写 `codex_app` 允许名单内的目标输出。`X-Openai-Subagent: collab_spawn` 只约束上游 native spawn 范围，不是插件入口。无 header、`collab_spawn` 或其他值都会走同一目标路径。根对象有非空 `previous_response_id` 或 `type: "response.append"` 时，带非空 `call_id` 的目标输出保守保持原状；没有 `call_id` 的真实 orphan 仍会降级。两种 continuation 标记都没有时，每个已配对调用只保留一个同 ID 输出。
+中文要点：这是 `codex_app.create_thread` / `send_message_to_thread` 的 fallback；默认关闭，仅改写 `codex_app` 允许名单内的目标输出。`X-Openai-Subagent: collab_spawn` 只约束上游 native spawn 范围，不是插件入口。无 header、`collab_spawn` 或其他值都会走同一目标路径。根对象有非空 `previous_response_id` 或 `type: "response.append"` 时，带非空 `call_id` 的目标输出保守保持原状；没有 `call_id` 的真实 orphan 仍会降级。两种 continuation 标记都没有时，每个已配对调用只保留一个同 ID 输出。ABI v1 下 schema 协商返回 `min(宿主, 5)`，宿主 schema < 4 拒绝；已验证 CPA 7.2.151/schema5 与 7.2.157/schema6，schema4 有合成测试，未发布宿主不保证全面兼容。
 
 ## Threat boundary
 
@@ -26,15 +26,17 @@ Review the source and release checksum before enabling it. The plugin is unaffil
 
 ## Compatibility
 
-- CPA: **v7.2.151 only**
-- Plugin ABI: v1; RPC schema: **5**
-- Plugin version: v0.2.2 (macOS/Darwin arm64 and Linux amd64 builds)
+- CPA: verified against **v7.2.151 (plugin schema 5)** and **v7.2.157 (plugin schema 6)**
+- Plugin ABI: v1
+- Plugin schema: minimum **4**, implemented maximum **5**. `plugin.register` and `plugin.reconfigure` return `min(host schema, 5)` and reject host schema < 4
+- Schema 4 lifecycle is covered by synthetic tests. Future schema negotiation does not guarantee full compatibility with unpublished hosts
+- Plugin version: v0.2.3 (macOS/Darwin arm64 and Linux amd64 builds)
 
 Windows and Intel macOS artifacts are not built or published.
 
 ## Install
 
-1. Obtain a v0.2.2 platform ZIP and matching `checksums.txt` from your approved distribution channel:
+1. Obtain a v0.2.3 platform ZIP and matching `checksums.txt` from your approved distribution channel:
 
    - macOS Apple Silicon: `codex-app-multisession-compat_darwin_arm64.zip`
    - Linux x86_64: `codex-app-multisession-compat_linux_amd64.zip`
@@ -90,7 +92,7 @@ Remove the corresponding `plugins.configs.codex-app-multisession-compat` block i
 
 ## Build and test
 
-Requires Go 1.26 and a CPA v7.2.151-compatible native toolchain for the target platform.
+Requires Go 1.26 and a CPA v7.2.151/v7.2.157-compatible native toolchain for the target platform.
 
 ```bash
 go test ./...
@@ -103,7 +105,7 @@ nm -gU dist/codex-app-multisession-compat.dylib | \
   rg 'cliproxy_plugin_init|cliproxyPluginCall|cliproxyPluginFree|cliproxyPluginShutdown'
 ```
 
-The generated C ABI exports registration, call, free-buffer, and shutdown entry points. Tests cover the allowlist, missing/empty/stale/matched call IDs, paired/parallel calls, non-target and non-text outputs, malformed roots/input, idempotence, disabled/source gating, headerless and arbitrary-header rewrite, and streaming request shape.
+The generated C ABI exports registration, call, free-buffer, and shutdown entry points. Tests cover the allowlist, missing/empty/stale/matched call IDs, paired/parallel calls, non-target and non-text outputs, malformed roots/input, idempotence, disabled/source gating, headerless and arbitrary-header rewrite, streaming request shape, and schema negotiation on register/reconfigure.
 
 ## License
 

@@ -43,10 +43,11 @@ import (
 )
 
 const (
-	pluginName                        = "codex-app-multisession-compat"
-	pluginVersion                     = "0.2.2"
-	repositoryURL                     = "https://github.com/patrick-fu/cpa-codex-app-multisession-compat"
-	minimumPluginSchemaVersion uint32 = 4
+	pluginName                             = "codex-app-multisession-compat"
+	pluginVersion                          = "0.2.3"
+	repositoryURL                          = "https://github.com/patrick-fu/cpa-codex-app-multisession-compat"
+	minimumPluginSchemaVersion      uint32 = 4
+	maxSupportedPluginSchemaVersion uint32 = 5
 )
 
 type envelope struct {
@@ -134,13 +135,14 @@ func handleMethod(method string, raw []byte) ([]byte, error) {
 				return nil, err
 			}
 		}
-		if request.SchemaVersion < minimumPluginSchemaVersion || request.SchemaVersion > pluginabi.SchemaVersion {
+		if request.SchemaVersion < minimumPluginSchemaVersion {
 			return nil, fmt.Errorf("unsupported plugin schema version %d", request.SchemaVersion)
 		}
+		negotiated := min(request.SchemaVersion, maxSupportedPluginSchemaVersion)
 		if err := configure(request.ConfigYAML); err != nil {
 			return nil, err
 		}
-		return okEnvelope(pluginRegistration(request.SchemaVersion))
+		return okEnvelope(pluginRegistration(negotiated))
 	case pluginabi.MethodRequestInterceptBefore:
 		return handleRequestInterceptBefore(raw)
 	case pluginabi.MethodRequestInterceptAfter:

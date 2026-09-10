@@ -245,16 +245,21 @@ func TestRegistrationDeclaresOnlyRequestInterceptor(t *testing.T) {
 	}
 }
 
-func TestSchema4And5RegistrationReconfigureAndShutdownLifecycle(t *testing.T) {
+func TestRegistrationReconfigureAndShutdownLifecycle(t *testing.T) {
 	resetConfig()
-	if pluginabi.SchemaVersion != 5 {
-		t.Fatalf("plugin schema version = %d, want 5", pluginabi.SchemaVersion)
-	}
-	for _, schemaVersion := range []uint32{4, 5} {
-		t.Run(fmt.Sprintf("schema-%d", schemaVersion), func(t *testing.T) {
+	for _, tc := range []struct {
+		host       uint32
+		negotiated uint32
+	}{
+		{host: 4, negotiated: 4},
+		{host: 5, negotiated: 5},
+		{host: 6, negotiated: 5},
+		{host: 7, negotiated: 5},
+	} {
+		t.Run(fmt.Sprintf("host-%d", tc.host), func(t *testing.T) {
 			registerRequest, err := json.Marshal(lifecycleRequest{
 				ConfigYAML:    []byte("enabled: false\n"),
-				SchemaVersion: schemaVersion,
+				SchemaVersion: tc.host,
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -266,11 +271,11 @@ func TestSchema4And5RegistrationReconfigureAndShutdownLifecycle(t *testing.T) {
 			if pluginEnabled() {
 				t.Fatal("register did not apply disabled config")
 			}
-			assertRegistrationResponse(t, "register", response, schemaVersion)
+			assertRegistrationResponse(t, "register", response, tc.negotiated)
 
 			reconfigureRequest, err := json.Marshal(lifecycleRequest{
 				ConfigYAML:    []byte("enabled: true\n"),
-				SchemaVersion: schemaVersion,
+				SchemaVersion: tc.host,
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -282,7 +287,7 @@ func TestSchema4And5RegistrationReconfigureAndShutdownLifecycle(t *testing.T) {
 			if !pluginEnabled() {
 				t.Fatal("reconfigure did not apply enabled config")
 			}
-			assertRegistrationResponse(t, "reconfigure", response, schemaVersion)
+			assertRegistrationResponse(t, "reconfigure", response, tc.negotiated)
 		})
 	}
 	if _, err := handleMethod(pluginabi.MethodPluginShutdown, nil); err != nil {
@@ -294,12 +299,46 @@ func TestSchema4And5RegistrationReconfigureAndShutdownLifecycle(t *testing.T) {
 }
 
 func TestRegistrationRejectsDifferentCPASchema(t *testing.T) {
-	raw, err := json.Marshal(lifecycleRequest{SchemaVersion: 3})
+	resetConfig()
+	if err := configure([]byte("enabled: true\n")); err != nil {
+		t.Fatal(err)
+	}
+	oldSchema, err := json.Marshal(lifecycleRequest{
+		ConfigYAML:    []byte("enabled: false\n"),
+		SchemaVersion: 3,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := handleMethod(pluginabi.MethodPluginRegister, raw); err == nil {
-		t.Fatal("registration accepted unsupported CPA schema 3")
+	missingSchema, err := json.Marshal(struct {
+		ConfigYAML []byte `json:"config_yaml"`
+	}{ConfigYAML: []byte("enabled: false\n")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name    string
+		raw     []byte
+		version uint32
+	}{
+		{name: "schema-3", raw: oldSchema, version: 3},
+		{name: "missing-schema", raw: missingSchema, version: 0},
+	} {
+		for _, method := range []string{pluginabi.MethodPluginRegister, pluginabi.MethodPluginReconfigure} {
+			t.Run(tc.name+"/"+method, func(t *testing.T) {
+				_, err := handleMethod(method, tc.raw)
+				if err == nil {
+					t.Fatalf("%s accepted unsupported CPA schema %d", method, tc.version)
+				}
+				want := fmt.Sprintf("unsupported plugin schema version %d", tc.version)
+				if err.Error() != want {
+					t.Fatalf("%s error = %v, want %s", method, err, want)
+				}
+				if !pluginEnabled() {
+					t.Fatal("rejected schema changed already enabled config")
+				}
+			})
+		}
 	}
 }
 
