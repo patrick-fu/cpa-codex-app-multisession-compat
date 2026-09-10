@@ -14,14 +14,14 @@
           {
             "goos": "linux",
             "goarch": "amd64",
-            "url": "https://github.com/patrick-fu/cpa-codex-app-multisession-compat/releases/download/untagged-97658b623ffd9ee645ba/codex-app-multisession-compat_linux_amd64.zip",
+            "url": "https://github.com/patrick-fu/cpa-codex-app-multisession-compat/releases/download/v0.2.3/codex-app-multisession-compat_linux_amd64.zip",
             "sha256": "0b5f8caa12173a48481cb8cef85b340b91a4b9dc5ae920547452fd0a32bda7b7",
             "size": 3596940
           },
           {
             "goos": "darwin",
             "goarch": "arm64",
-            "url": "https://github.com/patrick-fu/cpa-codex-app-multisession-compat/releases/download/untagged-97658b623ffd9ee645ba/codex-app-multisession-compat_darwin_arm64.zip",
+            "url": "https://github.com/patrick-fu/cpa-codex-app-multisession-compat/releases/download/v0.2.3/codex-app-multisession-compat_darwin_arm64.zip",
             "sha256": "e282b02502702a21fb3a8297e5a1cb636b3401893c08a4ae74958d3ab2ddce6f",
             "size": 1853848
           }
