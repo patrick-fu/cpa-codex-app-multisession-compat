@@ -15,23 +15,31 @@ import (
 
 func TestRewriteFixtures(t *testing.T) {
 	cases := []struct {
-		name    string
-		changed bool
+		name          string
+		changed       bool
+		wantConverted int
 	}{
-		{"allowlist", true},
-		{"missing-call-id", true},
-		{"empty-call-id", true},
-		{"stale-call-id", true},
-		{"matched-call-id", false},
-		{"paired", false},
-		{"parallel-pairs", false},
-		{"out-of-order-call", true},
-		{"non-target", false},
-		{"text-only", true},
-		{"same-call-id-double-output", true},
-		{"malformed-root", false},
-		{"malformed-input", false},
-		{"stream-shape", true},
+		{"allowlist", true, 0},
+		{"missing-call-id", true, 0},
+		{"empty-call-id", true, 0},
+		{"stale-call-id", true, 0},
+		{"matched-call-id", false, 0},
+		{"paired", false, 0},
+		{"parallel-pairs", false, 0},
+		{"out-of-order-call", true, 0},
+		{"non-target", false, 0},
+		{"text-only", true, 0},
+		{"same-call-id-double-output", true, 0},
+		{"malformed-root", false, 0},
+		{"malformed-input", false, 0},
+		{"stream-shape", true, 0},
+		{"heartbeat-missing-call-id", true, 1},
+		{"heartbeat-empty-call-id", true, 1},
+		{"heartbeat-paired", false, 0},
+		{"heartbeat-mixed-orphans", true, 4},
+		{"heartbeat-gemini-missing-call-id", true, 1},
+		{"heartbeat-with-metadata", true, 1},
+		{"heartbeat-with-id", true, 1},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -44,7 +52,7 @@ func TestRewriteFixtures(t *testing.T) {
 				t.Fatalf("unchanged body was modified\n got: %s\nwant: %s", got, body)
 			}
 			if changed {
-				assertOnlyExpectedConversions(t, got)
+				assertOnlyExpectedConversions(t, got, tc.wantConverted)
 			}
 		})
 	}
@@ -63,7 +71,7 @@ func TestRewriteIsIdempotent(t *testing.T) {
 }
 
 func TestRewriteIncrementalCodexAppOutputBoundaries(t *testing.T) {
-	for _, toolName := range []string{createThreadTool, sendMessageTool} {
+	for _, toolName := range []string{createThreadTool, sendMessageTool, automationUpdateTool} {
 		t.Run(toolName, func(t *testing.T) {
 			incremental := []byte(`{"previous_response_id":"resp_123","input":[{"type":"function_call_output","call_id":"call_123","namespace":"codex_app","name":"` + toolName + `","output":"incremental output"}]}`)
 			got, changed := rewriteOrphanedCodexAppOutputs(incremental)
@@ -194,7 +202,155 @@ func TestRewriteConsumesPairedCallIDOnce(t *testing.T) {
 	if err := json.Unmarshal(root.Input[1], &first); err != nil || first.Type != "function_call_output" {
 		t.Fatalf("first output was not preserved: %s; error = %v", root.Input[1], err)
 	}
-	assertOnlyExpectedConversions(t, got)
+	assertOnlyExpectedConversions(t, got, 0)
+}
+
+func TestRewriteHeartbeatAutomationUpdateKeepsPairedAndNormalToolOutput(t *testing.T) {
+	body := mustReadFixture(t, "heartbeat-mixed-orphans.json")
+	got, changed := rewriteOrphanedCodexAppOutputs(body)
+	if !changed {
+		t.Fatal("mixed heartbeat orphans were not rewritten")
+	}
+	var root struct {
+		Model string            `json:"model"`
+		Input []json.RawMessage `json:"input"`
+	}
+	if err := json.Unmarshal(got, &root); err != nil {
+		t.Fatal(err)
+	}
+	if root.Model != "grok-4.6" {
+		t.Fatalf("model = %q, want grok-4.6", root.Model)
+	}
+	if len(root.Input) != 7 {
+		t.Fatalf("input len = %d, want 7", len(root.Input))
+	}
+	var execOutput functionCallOutputItem
+	if err := json.Unmarshal(root.Input[1], &execOutput); err != nil {
+		t.Fatal(err)
+	}
+	if execOutput.Type != "function_call_output" || execOutput.CallID != "call-exec-1" {
+		t.Fatalf("paired exec_command output was rewritten: %s", root.Input[1])
+	}
+	converted := 0
+	for _, raw := range root.Input {
+		var item map[string]any
+		if err := json.Unmarshal(raw, &item); err != nil {
+			t.Fatal(err)
+		}
+		if item["type"] == "function_call_output" && item["name"] == "automation_update" {
+			t.Fatalf("heartbeat orphan remained a function_call_output: %s", raw)
+		}
+		content, _ := item["content"].([]any)
+		if item["type"] == "message" && len(content) > 0 {
+			part, _ := content[0].(map[string]any)
+			text, _ := part["text"].(string)
+			if len(text) >= len("[Tool output from codex_app.") && text[:len("[Tool output from codex_app.")] == "[Tool output from codex_app." {
+				converted++
+			}
+		}
+	}
+	if converted != 4 {
+		t.Fatalf("converted messages = %d, want 4 create/send/heartbeat items", converted)
+	}
+	assertOnlyExpectedConversions(t, got, 4)
+}
+
+func TestRewriteHeartbeatAutomationUpdateOnStreamAndGeminiRequests(t *testing.T) {
+	wantHeartbeat := "<heartbeat>\n  <automation_id>fixture-automation</automation_id>\n</heartbeat>"
+	for _, tc := range []struct {
+		name string
+		file string
+	}{
+		{name: "grok", file: "heartbeat-missing-call-id.json"},
+		{name: "gemini", file: "heartbeat-gemini-missing-call-id.json"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := mustReadFixture(t, tc.file)
+			got, changed := rewriteOrphanedCodexAppOutputs(body)
+			if !changed {
+				t.Fatal("heartbeat orphan was not rewritten")
+			}
+			if text := convertedOutputText(t, got); text != formatConvertedOutput(automationUpdateTool, wantHeartbeat) {
+				t.Fatalf("converted output = %q", text)
+			}
+		})
+	}
+	streamBody := []byte(`{"stream":true,"input":[{"type":"function_call_output","namespace":"codex_app","name":"automation_update","output":"<heartbeat/>"}]}`)
+	got, changed := rewriteOrphanedCodexAppOutputs(streamBody)
+	if !changed {
+		t.Fatal("streaming heartbeat orphan was not rewritten")
+	}
+	if text := convertedOutputText(t, got); text != formatConvertedOutput(automationUpdateTool, "<heartbeat/>") {
+		t.Fatalf("stream converted output = %q", text)
+	}
+}
+
+func TestRewriteHeartbeatAutomationUpdateDoesNotInventCallPairing(t *testing.T) {
+	body := []byte(`{"input":[{"type":"function_call","call_id":"call-other","name":"exec_command"},{"type":"function_call_output","namespace":"codex_app","name":"automation_update","output":"<heartbeat/>"}]}`)
+	got, changed := rewriteOrphanedCodexAppOutputs(body)
+	if !changed {
+		t.Fatal("unmatched heartbeat output was not rewritten")
+	}
+	var root struct {
+		Input []map[string]any `json:"input"`
+	}
+	if err := json.Unmarshal(got, &root); err != nil {
+		t.Fatal(err)
+	}
+	if root.Input[1]["type"] != "message" {
+		t.Fatalf("unmatched heartbeat was paired or left as tool output: %s", got)
+	}
+	if _, ok := root.Input[1]["call_id"]; ok {
+		t.Fatalf("rewrite invented call_id: %s", got)
+	}
+}
+
+func TestRewriteHeartbeatPayloadsDropPassthroughAndKeepPrefix(t *testing.T) {
+	cases := []struct {
+		file string
+		want string
+	}{
+		{
+			file: "heartbeat-with-metadata.json",
+			want: formatConvertedOutput(automationUpdateTool, "<heartbeat>\n  <automation_id>fixture-automation</automation_id>\n  <current_time_iso>2026-01-01T00:00:00.000Z</current_time_iso>\n</heartbeat>"),
+		},
+		{
+			file: "heartbeat-with-id.json",
+			want: formatConvertedOutput(automationUpdateTool, "<heartbeat>\n  <automation_id>fixture-automation</automation_id>\n</heartbeat>"),
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.file, func(t *testing.T) {
+			body := mustReadFixture(t, tc.file)
+			got, changed := rewriteOrphanedCodexAppOutputs(body)
+			if !changed {
+				t.Fatal("heartbeat payload was not rewritten")
+			}
+			var root struct {
+				Input []map[string]any `json:"input"`
+			}
+			if err := json.Unmarshal(got, &root); err != nil {
+				t.Fatal(err)
+			}
+			if len(root.Input) != 1 {
+				t.Fatalf("input len = %d, want 1", len(root.Input))
+			}
+			item := root.Input[0]
+			if item["type"] != "message" || item["role"] != "user" {
+				t.Fatalf("heartbeat payload was not converted to user message: %s", got)
+			}
+			if _, ok := item["id"]; ok {
+				t.Fatalf("converted message kept function call id: %s", got)
+			}
+			if _, ok := item["internal_chat_message_metadata_passthrough"]; ok {
+				t.Fatalf("converted message kept passthrough metadata: %s", got)
+			}
+			if text := convertedOutputText(t, got); text != tc.want {
+				t.Fatalf("converted output = %q, want %q", text, tc.want)
+			}
+			assertOnlyExpectedConversions(t, got, 1)
+		})
+	}
 }
 
 func TestRewriteConvertsNonStringOutputsToJSONText(t *testing.T) {
@@ -431,7 +587,7 @@ func convertedOutputText(t *testing.T, body []byte) string {
 	return root.Input[0].Content[0].Text
 }
 
-func assertOnlyExpectedConversions(t *testing.T, body []byte) {
+func assertOnlyExpectedConversions(t *testing.T, body []byte, wantConverted int) {
 	t.Helper()
 	var request struct {
 		Input []map[string]any `json:"input"`
@@ -440,25 +596,42 @@ func assertOnlyExpectedConversions(t *testing.T, body []byte) {
 		t.Fatal(err)
 	}
 	converted := 0
+	prefix := "[Tool output from codex_app."
 	for _, item := range request.Input {
+		if item["type"] == "function_call_output" {
+			namespace, _ := item["namespace"].(string)
+			name, _ := item["name"].(string)
+			callID, _ := item["call_id"].(string)
+			if namespace == codexAppNamespace && isTargetTool(name) && callID == "" {
+				t.Fatalf("unmatched allowlisted output remained: %#v", item)
+			}
+			continue
+		}
 		if item["type"] != "message" {
+			continue
+		}
+		content, ok := item["content"].([]any)
+		if !ok || len(content) != 1 {
+			continue
+		}
+		part, ok := content[0].(map[string]any)
+		if !ok || part["type"] != "input_text" {
+			continue
+		}
+		text, _ := part["text"].(string)
+		if len(text) < len(prefix) || text[:len(prefix)] != prefix {
 			continue
 		}
 		if item["role"] != "user" {
 			t.Fatalf("converted role = %#v", item["role"])
 		}
-		content, ok := item["content"].([]any)
-		if !ok || len(content) != 1 {
-			t.Fatalf("converted content = %#v", item["content"])
-		}
-		part, ok := content[0].(map[string]any)
-		if !ok || part["type"] != "input_text" {
-			t.Fatalf("converted content part = %#v", content[0])
-		}
 		converted++
 	}
 	if converted == 0 {
 		t.Fatal("expected at least one converted item")
+	}
+	if wantConverted > 0 && converted != wantConverted {
+		t.Fatalf("converted messages = %d, want %d", converted, wantConverted)
 	}
 }
 

@@ -1,0 +1,12 @@
+{
+  "model": "grok-4.6",
+  "input": [
+    {
+      "type": "function_call_output",
+      "id": "fco_fixture_scheduler",
+      "name": "automation_update",
+      "namespace": "codex_app",
+      "output": "<heartbeat>\n  <automation_id>fixture-automation</automation_id>\n</heartbeat>"
+    }
+  ]
+}

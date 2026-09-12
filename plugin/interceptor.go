@@ -12,6 +12,7 @@ const (
 	codexAppNamespace     = "codex_app"
 	createThreadTool      = "create_thread"
 	sendMessageTool       = "send_message_to_thread"
+	automationUpdateTool  = "automation_update"
 	convertedOutputPrefix = "[Tool output from codex_app.%s]\n"
 )
 
@@ -173,7 +174,7 @@ func outputText(raw json.RawMessage) (string, bool) {
 }
 
 func isTargetTool(name string) bool {
-	return name == createThreadTool || name == sendMessageTool
+	return name == createThreadTool || name == sendMessageTool || name == automationUpdateTool
 }
 
 func formatConvertedOutput(name, output string) string {

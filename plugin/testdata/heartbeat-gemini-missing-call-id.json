@@ -1,0 +1,1 @@
+{"model":"gemini-3.8-flash-high","input":[{"type":"function_call_output","id":"fco_gemini_heartbeat","namespace":"codex_app","name":"automation_update","output":"<heartbeat>\n  <automation_id>fixture-automation</automation_id>\n</heartbeat>"}]}

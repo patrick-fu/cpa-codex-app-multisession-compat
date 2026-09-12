@@ -8,15 +8,15 @@ Before CPA selects credentials, and only for `SourceFormat: openai-response`, th
 
 - `type` is `function_call_output`;
 - `namespace` is `codex_app`;
-- `name` is `create_thread` or `send_message_to_thread`;
+- `name` is `create_thread`, `send_message_to_thread`, or `automation_update`;
 - `output` is a JSON value (or is missing); and
 - `call_id` is missing or empty; or, when the root has neither a non-empty `previous_response_id` nor `type: "response.append"`, no preceding unpaired `function_call` in this request has the same non-empty `call_id`.
 
-The replacement is an ordinary `role: user`, `type: message` item with one `input_text` part. Its text begins with an explicit source label, followed by the original output string. The plugin never creates a tool call, call ID, tool name, or any other tool state. It is the fallback for `codex_app.create_thread` / `send_message_to_thread` outputs that reach this interceptor. `X-Openai-Subagent: collab_spawn` is an upstream native-spawn scoping signal, not a plugin entry condition: missing, `collab_spawn`, and other values all follow the same fallback path.
+The replacement is an ordinary `role: user`, `type: message` item with one `input_text` part. Its text begins with an explicit source label, followed by the original output string. The plugin never creates a tool call, call ID, tool name, or any other tool state. It is the fallback for `codex_app.create_thread` / `send_message_to_thread` / `automation_update` outputs that reach this interceptor. Heartbeat `automation_update` items that have no matching `function_call` in this request are converted as user messages; the plugin never invents a `call_id` or synthetic tool pair. `X-Openai-Subagent: collab_spawn` is an upstream native-spawn scoping signal, not a plugin entry condition: missing, `collab_spawn`, and other values all follow the same fallback path.
 
 For a stateless incremental request, either a non-empty root `previous_response_id` or root `type: "response.append"`, plus a non-empty allowlisted output `call_id`, is conservatively preserved as-is; the plugin does not infer whether that call belongs to earlier history. A real orphan without a `call_id` is still downgraded. Without either continuation marker, the normal same-request paired/parallel boundary applies: each preceding `function_call` can keep one output with its `call_id` as-is, while a second output with that same ID, a stale ID, or an output that precedes its call is downgraded. String output is preserved as text; other JSON output is preserved as JSON text, and a missing `output` becomes `null`. The plugin leaves all non-allowlisted namespaces/names, custom outputs, malformed request roots or `input`, and non-Responses requests untouched. Streaming request shape does not change this rule.
 
-中文要点：这是 `codex_app.create_thread` / `send_message_to_thread` 的 fallback；默认关闭，仅改写 `codex_app` 允许名单内的目标输出。`X-Openai-Subagent: collab_spawn` 只约束上游 native spawn 范围，不是插件入口。无 header、`collab_spawn` 或其他值都会走同一目标路径。根对象有非空 `previous_response_id` 或 `type: "response.append"` 时，带非空 `call_id` 的目标输出保守保持原状；没有 `call_id` 的真实 orphan 仍会降级。两种 continuation 标记都没有时，每个已配对调用只保留一个同 ID 输出。ABI v1 下 schema 协商返回 `min(宿主, 5)`，宿主 schema < 4 拒绝；已验证 CPA 7.2.151/schema5 与 7.2.157/schema6，schema4 有合成测试，未发布宿主不保证全面兼容。
+中文要点：这是 `codex_app.create_thread` / `send_message_to_thread` / `automation_update` 的 fallback；默认关闭，仅改写 `codex_app` 允许名单内的目标输出。无匹配 `function_call` 的 heartbeat `automation_update` 会降级为 user message，不伪造 `call_id`。`X-Openai-Subagent: collab_spawn` 只约束上游 native spawn 范围，不是插件入口。无 header、`collab_spawn` 或其他值都会走同一目标路径。根对象有非空 `previous_response_id` 或 `type: "response.append"` 时，带非空 `call_id` 的目标输出保守保持原状；没有 `call_id` 的真实 orphan 仍会降级。两种 continuation 标记都没有时，每个已配对调用只保留一个同 ID 输出。ABI v1 下 schema 协商返回 `min(宿主, 5)`，宿主 schema < 4 拒绝；已验证 CPA 7.2.151/schema5 与 7.2.157/schema6，schema4 有合成测试，未发布宿主不保证全面兼容。
 
 ## Threat boundary
 
@@ -27,16 +27,17 @@ Review the source and release checksum before enabling it. The plugin is unaffil
 ## Compatibility
 
 - CPA: verified against **v7.2.151 (plugin schema 5)** and **v7.2.157 (plugin schema 6)**
+- The v0.2.4 heartbeat flow is also verified against **v7.2.158 (plugin schema 6)** on macOS arm64, including plugin loading and a local upstream 422/200 regression check
 - Plugin ABI: v1
 - Plugin schema: minimum **4**, implemented maximum **5**. `plugin.register` and `plugin.reconfigure` return `min(host schema, 5)` and reject host schema < 4
 - Schema 4 lifecycle is covered by synthetic tests. Future schema negotiation does not guarantee full compatibility with unpublished hosts
-- Plugin version: v0.2.3 (macOS/Darwin arm64 and Linux amd64 builds)
+- Plugin version: v0.2.4 (macOS/Darwin arm64 and Linux amd64 builds)
 
 Windows and Intel macOS artifacts are not built or published.
 
 ## Install
 
-1. Obtain a v0.2.3 platform ZIP and matching `checksums.txt` from your approved distribution channel:
+1. Obtain a v0.2.4 platform ZIP and matching `checksums.txt` from your approved distribution channel:
 
    - macOS Apple Silicon: `codex-app-multisession-compat_darwin_arm64.zip`
    - Linux x86_64: `codex-app-multisession-compat_linux_amd64.zip`
@@ -105,7 +106,7 @@ nm -gU dist/codex-app-multisession-compat.dylib | \
   rg 'cliproxy_plugin_init|cliproxyPluginCall|cliproxyPluginFree|cliproxyPluginShutdown'
 ```
 
-The generated C ABI exports registration, call, free-buffer, and shutdown entry points. Tests cover the allowlist, missing/empty/stale/matched call IDs, paired/parallel calls, non-target and non-text outputs, malformed roots/input, idempotence, disabled/source gating, headerless and arbitrary-header rewrite, streaming request shape, and schema negotiation on register/reconfigure.
+The generated C ABI exports registration, call, free-buffer, and shutdown entry points. Tests cover the allowlist, missing/empty/stale/matched call IDs, paired/parallel calls, non-target and non-text outputs, heartbeat automation_update orphans, malformed roots/input, idempotence, disabled/source gating, headerless and arbitrary-header rewrite, streaming request shape, and schema negotiation on register/reconfigure.
 
 ## License
 

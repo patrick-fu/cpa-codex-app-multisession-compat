@@ -1,0 +1,16 @@
+{
+  "model": "grok-4.6",
+  "input": [
+    {
+      "type": "function_call_output",
+      "id": "fco_fixture_metadata",
+      "name": "automation_update",
+      "namespace": "codex_app",
+      "output": "<heartbeat>\n  <automation_id>fixture-automation</automation_id>\n  <current_time_iso>2026-01-01T00:00:00.000Z</current_time_iso>\n</heartbeat>",
+      "internal_chat_message_metadata_passthrough": {
+        "turn_id": "fixture-turn",
+        "create_time": 1767225600.0
+      }
+    }
+  ]
+}
