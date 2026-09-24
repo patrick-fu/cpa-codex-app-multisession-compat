@@ -31,27 +31,31 @@ Review the source and release checksum before enabling it. The plugin is unaffil
 - Plugin ABI: v1
 - Plugin schema: minimum **4**, implemented maximum **5**. `plugin.register` and `plugin.reconfigure` return `min(host schema, 5)` and reject host schema < 4
 - Schema 4 lifecycle is covered by synthetic tests. Future schema negotiation does not guarantee full compatibility with unpublished hosts
-- Plugin version: v0.2.4 (macOS/Darwin arm64 and Linux amd64 builds)
+- Plugin version: v0.2.5 (macOS/Darwin amd64 and arm64, Linux amd64 and arm64, Windows amd64 builds)
 
-Windows and Intel macOS artifacts are not built or published.
+The published binaries cover the five platforms above. Runtime compatibility checks described above were performed on macOS arm64.
 
 ## Install
 
-1. Obtain a v0.2.4 platform ZIP and matching `checksums.txt` from your approved distribution channel:
+1. Obtain a v0.2.5 platform ZIP and matching `checksums.txt` from your approved distribution channel:
 
-   - macOS Apple Silicon: `codex-app-multisession-compat_darwin_arm64.zip`
-   - Linux x86_64: `codex-app-multisession-compat_linux_amd64.zip`
+   - macOS Apple Silicon: `codex-app-multisession-compat_0.2.5_darwin_arm64.zip`
+   - macOS Intel: `codex-app-multisession-compat_0.2.5_darwin_amd64.zip`
+   - Linux x86_64: `codex-app-multisession-compat_0.2.5_linux_amd64.zip`
+   - Linux arm64: `codex-app-multisession-compat_0.2.5_linux_arm64.zip`
+   - Windows x86_64: `codex-app-multisession-compat_0.2.5_windows_amd64.zip`
 2. Verify it before extraction:
 
    ```bash
-   shasum -a 256 -c checksums.txt
+   artifact=codex-app-multisession-compat_0.2.5_darwin_arm64.zip
+   grep -F "  $artifact" checksums.txt | shasum -a 256 -c -
    ```
 
-3. Extract the single `.dylib` into CPA's plugin location. With CPA's default plugin directory:
+3. Extract the single native library into CPA's plugin location. With CPA's default plugin directory on macOS Apple Silicon:
 
    ```bash
    mkdir -p plugins/darwin/arm64
-   unzip -j codex-app-multisession-compat_darwin_arm64.zip \
+   unzip -j codex-app-multisession-compat_0.2.5_darwin_arm64.zip \
      -d plugins/darwin/arm64
    ```
 
@@ -59,9 +63,11 @@ Windows and Intel macOS artifacts are not built or published.
 
    ```bash
    mkdir -p plugins/linux/amd64
-   unzip -j codex-app-multisession-compat_linux_amd64.zip \
+   unzip -j codex-app-multisession-compat_0.2.5_linux_amd64.zip \
      -d plugins/linux/amd64
    ```
+
+   For another platform, use its matching `plugins/<goos>/<goarch>` directory and ZIP. The library extension is `.dylib` on macOS, `.so` on Linux, and `.dll` on Windows.
 
 4. Enable CPA plugins and this plugin explicitly. The default is off:
 
@@ -77,7 +83,7 @@ Restart or reload CPA according to its normal configuration lifecycle.
 
 ## Verify and manage
 
-Use CPA's management API/UI after the reload. `GET /v0/management/plugins` should report the plugin as discovered, registered, and effectively enabled. Its artifact name is `codex-app-multisession-compat.dylib` on Darwin and `codex-app-multisession-compat.so` on Linux.
+Use CPA's management API/UI after the reload. `GET /v0/management/plugins` should report the plugin as discovered, registered, and effectively enabled. Its artifact name is `codex-app-multisession-compat.dylib` on Darwin, `codex-app-multisession-compat.so` on Linux, and `codex-app-multisession-compat.dll` on Windows.
 
 To disable it without deleting the binary, set `plugins.configs.codex-app-multisession-compat.enabled: false` (or use CPA's `PATCH /v0/management/plugins/codex-app-multisession-compat/enabled` endpoint), then reload CPA. This makes the feature inactive immediately on the next configuration application.
 

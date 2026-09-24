@@ -18,15 +18,31 @@ jobs:
             goos: darwin
             goarch: arm64
             extension: dylib
-            artifact: codex-app-multisession-compat_darwin_arm64.zip
+            nm_command: nm -gU
+          - runner: macos-15-intel
+            goos: darwin
+            goarch: amd64
+            extension: dylib
             nm_command: nm -gU
           - runner: ubuntu-24.04
             goos: linux
             goarch: amd64
             extension: so
-            artifact: codex-app-multisession-compat_linux_amd64.zip
             nm_command: nm -g
+          - runner: ubuntu-24.04-arm
+            goos: linux
+            goarch: arm64
+            extension: so
+            nm_command: nm -g
+          - runner: windows-2025
+            goos: windows
+            goarch: amd64
+            extension: dll
+            nm_command: go tool nm
     runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: bash
     steps:
       # v5.0.0
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
@@ -37,6 +53,8 @@ jobs:
         run: |
           test "$GITHUB_REF_TYPE" = tag
           printf '%s\n' "$GITHUB_REF_NAME" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+          version="${GITHUB_REF_NAME#v}"
+          grep -Eq "pluginVersion[[:space:]]*=[[:space:]]*\"${version}\"" plugin/main.go
 
       # v6.0.0
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16
@@ -67,23 +85,11 @@ jobs:
           printf '%s\n' "$exports" | grep -Eq '_?cliproxyPluginFree$'
           printf '%s\n' "$exports" | grep -Eq '_?cliproxyPluginShutdown$'
 
-      - name: Package exactly one root artifact
-        run: |
-          test "$(find dist/stage -maxdepth 1 -type f | wc -l | tr -d ' ')" = 1
-          test -f dist/stage/codex-app-multisession-compat.${{ matrix.extension }}
-          (
-            cd dist/stage
-            zip -q ../${{ matrix.artifact }} \
-              codex-app-multisession-compat.${{ matrix.extension }}
-          )
-          test "$(unzip -Z1 dist/${{ matrix.artifact }})" = \
-            "codex-app-multisession-compat.${{ matrix.extension }}"
-
       # v4.6.2
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: release-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: dist/${{ matrix.artifact }}
+          path: dist/stage/codex-app-multisession-compat.${{ matrix.extension }}
           if-no-files-found: error
 
   release:
@@ -94,8 +100,32 @@ jobs:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           pattern: release-*
-          path: dist
-          merge-multiple: true
+          path: staging
+          merge-multiple: false
+
+      - name: Package platform libraries
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          mkdir -p dist
+          for platform in darwin-arm64 darwin-amd64 linux-amd64 linux-arm64 windows-amd64; do
+            goos="${platform%-*}"
+            goarch="${platform#*-}"
+            case "$goos" in
+              darwin) extension=dylib ;;
+              linux) extension=so ;;
+              windows) extension=dll ;;
+            esac
+            library="codex-app-multisession-compat.${extension}"
+            source="staging/release-${platform}/${library}"
+            archive="codex-app-multisession-compat_${version}_${goos}_${goarch}.zip"
+            test -f "$source"
+            (
+              cd "staging/release-${platform}"
+              zip -q "${GITHUB_WORKSPACE}/dist/${archive}" "$library"
+            )
+            test "$(unzip -Z1 "dist/${archive}")" = "$library"
+          done
+          test "$(find dist -maxdepth 1 -name '*.zip' -type f | wc -l | tr -d ' ')" = 5
 
       - name: Create and validate checksums
         run: |
@@ -112,6 +142,5 @@ jobs:
           draft: true
           generate_release_notes: true
           files: |
-            dist/codex-app-multisession-compat_darwin_arm64.zip
-            dist/codex-app-multisession-compat_linux_amd64.zip
+            dist/codex-app-multisession-compat_*.zip
             dist/checksums.txt
