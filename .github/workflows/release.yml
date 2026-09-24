@@ -80,10 +80,11 @@ jobs:
       - name: Verify exported CPA ABI
         run: |
           exports="$( ${{ matrix.nm_command }} dist/stage/codex-app-multisession-compat.${{ matrix.extension }} )"
-          printf '%s\n' "$exports" | grep -Eq '_?cliproxy_plugin_init$'
-          printf '%s\n' "$exports" | grep -Eq '_?cliproxyPluginCall$'
-          printf '%s\n' "$exports" | grep -Eq '_?cliproxyPluginFree$'
-          printf '%s\n' "$exports" | grep -Eq '_?cliproxyPluginShutdown$'
+          # A pipe to grep -q can SIGPIPE on the larger Windows symbol table under pipefail.
+          grep -Eq '_?cliproxy_plugin_init$' <<< "$exports"
+          grep -Eq '_?cliproxyPluginCall$' <<< "$exports"
+          grep -Eq '_?cliproxyPluginFree$' <<< "$exports"
+          grep -Eq '_?cliproxyPluginShutdown$' <<< "$exports"
 
       # v4.6.2
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

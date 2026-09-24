@@ -31,23 +31,23 @@ Review the source and release checksum before enabling it. The plugin is unaffil
 - Plugin ABI: v1
 - Plugin schema: minimum **4**, implemented maximum **5**. `plugin.register` and `plugin.reconfigure` return `min(host schema, 5)` and reject host schema < 4
 - Schema 4 lifecycle is covered by synthetic tests. Future schema negotiation does not guarantee full compatibility with unpublished hosts
-- Plugin version: v0.2.5 (macOS/Darwin amd64 and arm64, Linux amd64 and arm64, Windows amd64 builds)
+- Plugin version: v0.2.6 (macOS/Darwin amd64 and arm64, Linux amd64 and arm64, Windows amd64 builds)
 
 The published binaries cover the five platforms above. Runtime compatibility checks described above were performed on macOS arm64.
 
 ## Install
 
-1. Obtain a v0.2.5 platform ZIP and matching `checksums.txt` from your approved distribution channel:
+1. Obtain a v0.2.6 platform ZIP and matching `checksums.txt` from your approved distribution channel:
 
-   - macOS Apple Silicon: `codex-app-multisession-compat_0.2.5_darwin_arm64.zip`
-   - macOS Intel: `codex-app-multisession-compat_0.2.5_darwin_amd64.zip`
-   - Linux x86_64: `codex-app-multisession-compat_0.2.5_linux_amd64.zip`
-   - Linux arm64: `codex-app-multisession-compat_0.2.5_linux_arm64.zip`
-   - Windows x86_64: `codex-app-multisession-compat_0.2.5_windows_amd64.zip`
-2. Verify it before extraction:
+   - macOS Apple Silicon: `codex-app-multisession-compat_0.2.6_darwin_arm64.zip`
+   - macOS Intel: `codex-app-multisession-compat_0.2.6_darwin_amd64.zip`
+   - Linux x86_64: `codex-app-multisession-compat_0.2.6_linux_amd64.zip`
+   - Linux arm64: `codex-app-multisession-compat_0.2.6_linux_arm64.zip`
+   - Windows x86_64: `codex-app-multisession-compat_0.2.6_windows_amd64.zip`
+2. Set `artifact` to the ZIP you downloaded, then verify it before extraction. For example, on macOS Apple Silicon:
 
    ```bash
-   artifact=codex-app-multisession-compat_0.2.5_darwin_arm64.zip
+   artifact=codex-app-multisession-compat_0.2.6_darwin_arm64.zip
    grep -F "  $artifact" checksums.txt | shasum -a 256 -c -
    ```
 
@@ -55,7 +55,7 @@ The published binaries cover the five platforms above. Runtime compatibility che
 
    ```bash
    mkdir -p plugins/darwin/arm64
-   unzip -j codex-app-multisession-compat_0.2.5_darwin_arm64.zip \
+   unzip -j codex-app-multisession-compat_0.2.6_darwin_arm64.zip \
      -d plugins/darwin/arm64
    ```
 
@@ -63,7 +63,7 @@ The published binaries cover the five platforms above. Runtime compatibility che
 
    ```bash
    mkdir -p plugins/linux/amd64
-   unzip -j codex-app-multisession-compat_0.2.5_linux_amd64.zip \
+   unzip -j codex-app-multisession-compat_0.2.6_linux_amd64.zip \
      -d plugins/linux/amd64
    ```
 

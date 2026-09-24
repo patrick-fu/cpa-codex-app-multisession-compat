@@ -44,7 +44,7 @@ import (
 
 const (
 	pluginName                             = "codex-app-multisession-compat"
-	pluginVersion                          = "0.2.5"
+	pluginVersion                          = "0.2.6"
 	repositoryURL                          = "https://github.com/patrick-fu/cpa-codex-app-multisession-compat"
 	minimumPluginSchemaVersion      uint32 = 4
 	maxSupportedPluginSchemaVersion uint32 = 5
