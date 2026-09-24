@@ -6,24 +6,45 @@
       "name": "CPA Codex App Multisession Compatibility",
       "description": "A native CLIProxyAPI plugin that provides Codex App multisession replay compatibility.",
       "author": "Patrick Fu",
-      "version": "0.2.4",
+      "version": "0.2.6",
       "repository": "https://github.com/patrick-fu/cpa-codex-app-multisession-compat",
       "install": {
         "type": "direct",
         "artifacts": [
           {
-            "goos": "linux",
+            "goos": "darwin",
             "goarch": "amd64",
-            "url": "https://github.com/patrick-fu/cpa-codex-app-multisession-compat/releases/download/v0.2.4/codex-app-multisession-compat_linux_amd64.zip",
-            "sha256": "df12b54ffb8469d6243aac95eabab938218ce94663edf9e7045ab696a0dfc17f",
-            "size": 3597466
+            "url": "https://github.com/patrick-fu/cpa-codex-app-multisession-compat/releases/download/v0.2.6/codex-app-multisession-compat_0.2.6_darwin_amd64.zip",
+            "sha256": "d4afb20e026e9abafd6980586250558d81ae8d0aaed4c43abfff875286d50e17",
+            "size": 2000678
           },
           {
             "goos": "darwin",
             "goarch": "arm64",
-            "url": "https://github.com/patrick-fu/cpa-codex-app-multisession-compat/releases/download/v0.2.4/codex-app-multisession-compat_darwin_arm64.zip",
-            "sha256": "16ed29c2d9e4be8456cf05f5dc645b2b8d7636f77aec52bb8c0aed274b21a069",
-            "size": 1854023
+            "url": "https://github.com/patrick-fu/cpa-codex-app-multisession-compat/releases/download/v0.2.6/codex-app-multisession-compat_0.2.6_darwin_arm64.zip",
+            "sha256": "b77422b358840eb3607d136560763afa6805b73aedce9c5d14727d8eb924eb35",
+            "size": 1854018
+          },
+          {
+            "goos": "linux",
+            "goarch": "amd64",
+            "url": "https://github.com/patrick-fu/cpa-codex-app-multisession-compat/releases/download/v0.2.6/codex-app-multisession-compat_0.2.6_linux_amd64.zip",
+            "sha256": "ffaea092d424804c4ab237f8a7139515467f6f19b819d2d1409696d351153be2",
+            "size": 3597426
+          },
+          {
+            "goos": "linux",
+            "goarch": "arm64",
+            "url": "https://github.com/patrick-fu/cpa-codex-app-multisession-compat/releases/download/v0.2.6/codex-app-multisession-compat_0.2.6_linux_arm64.zip",
+            "sha256": "7adf684fbcc744d697066ed0ea4f4bdb8f613970f252d3bf2e13ea0cbdd4c28c",
+            "size": 3265223
+          },
+          {
+            "goos": "windows",
+            "goarch": "amd64",
+            "url": "https://github.com/patrick-fu/cpa-codex-app-multisession-compat/releases/download/v0.2.6/codex-app-multisession-compat_0.2.6_windows_amd64.zip",
+            "sha256": "56d947f1b3b5f0dc92d61324ed91646ae16352c5aefc0ad4ac6ea67260e96ddf",
+            "size": 3539501
           }
         ]
       }
